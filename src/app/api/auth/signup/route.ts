@@ -86,6 +86,9 @@ export async function POST(request: NextRequest) {
      * 2. We're making a first-time signup, no existing auth
      * 3. Simpler to use plain axios
      */
+
+    console.log('📤 Calling backend signup:', body.email)
+
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
     const response = await axios.post<AuthResponse>(
       `${backendUrl}/auth/signup`,
@@ -97,11 +100,27 @@ export async function POST(request: NextRequest) {
       }
     )
 
+    console.log('📥 Backend response status:', response.status)
+    console.log('📥 Backend response data:', {
+      hasAccessToken: !!response.data?.accessToken,
+      hasRefreshToken: !!response.data?.refreshToken,
+      accessTokenLength: response.data?.accessToken?.length || 0,
+      refreshTokenLength: response.data?.refreshToken?.length || 0
+    })
     /**
      * Extract tokens from backend response
      * Your NestJS backend returns: { accessToken: string, refreshToken: string }
      */
     const { accessToken, refreshToken } = response.data
+
+    // ✅ Validate tokens exist
+    if (!accessToken || !refreshToken) {
+      console.error('❌ Backend did not return tokens!')
+      return NextResponse.json(
+        { error: 'Authentication failed - no tokens received' },
+        { status: 500 }
+      )
+    }
 
     /**
      * Set httpOnly cookies with the tokens
@@ -110,6 +129,9 @@ export async function POST(request: NextRequest) {
      * Cookies will be automatically included in subsequent requests
      */
     await setAuthCookies(accessToken, refreshToken)
+
+    console.log('✅ Signup successful, cookies set')
+
 
     /**
      * Return success response

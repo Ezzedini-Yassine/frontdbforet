@@ -28,7 +28,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Call NestJS backend signin endpoint
+    console.log('📤 Calling backend signin:', body.email)
+
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
     const response = await axios.post<AuthResponse>(
       `${backendUrl}/auth/signin`,
@@ -40,13 +41,30 @@ export async function POST(request: NextRequest) {
       }
     )
 
-    // Extract tokens from backend response
+    console.log('📥 Backend response status:', response.status)
+    console.log('📥 Backend response data:', {
+      hasAccessToken: !!response.data?.accessToken,
+      hasRefreshToken: !!response.data?.refreshToken,
+      accessTokenLength: response.data?.accessToken?.length || 0,
+      refreshTokenLength: response.data?.refreshToken?.length || 0
+    })
+
     const { accessToken, refreshToken } = response.data
 
-    // Set httpOnly cookies with tokens
-    await setAuthCookies(accessToken, refreshToken)
+    // ✅ Validate tokens exist
+    if (!accessToken || !refreshToken) {
+      console.error('❌ Backend did not return tokens!')
+      return NextResponse.json(
+        { error: 'Authentication failed - no tokens received' },
+        { status: 500 }
+      )
+    }
 
-    // Return success (tokens are in cookies, not body)
+    // ✅ Set cookies
+    await setAuthCookies(accessToken, refreshToken)
+    
+    console.log('✅ Signin successful, cookies set')
+
     return NextResponse.json(
       { 
         message: 'Signin successful',
@@ -60,7 +78,7 @@ export async function POST(request: NextRequest) {
       const status = error.response?.status || 500
       const message = error.response?.data?.message || 'Signin failed'
       
-      console.error('Backend signin error:', {
+      console.error('❌ Backend signin error:', {
         status,
         message,
         data: error.response?.data
@@ -72,7 +90,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.error('Signin error:', error)
+    console.error('❌ Signin error:', error)
     return NextResponse.json(
       { error: 'An unexpected error occurred' },
       { status: 500 }

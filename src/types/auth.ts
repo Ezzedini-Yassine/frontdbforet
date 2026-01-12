@@ -29,6 +29,7 @@ export interface AuthResponse {
 // User object (you might expand this later)
 export interface User {
   email: string
+  username?: string
   // Add more fields as your backend provides them
   // e.g., id, name, role, etc.
 }

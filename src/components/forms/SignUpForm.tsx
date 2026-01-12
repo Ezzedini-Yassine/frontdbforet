@@ -249,6 +249,40 @@ export default function SignUpForm() {
           )}
         </div>
 
+        {/* Username Field */}
+          <div>
+          <label
+            htmlFor="username"
+            className="block text-sm font-medium text-gray-700 mb-1"
+          >
+            Username
+          </label>
+          <input
+            {...register('username')}
+            type="text"
+            id="username"
+            className={`
+              w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2
+              ${errors.username 
+                ? 'border-red-500 focus:ring-red-500' 
+                : 'border-gray-300 focus:ring-blue-500'
+              }
+            `}
+            placeholder="yacine_dev"
+            disabled={isSubmitting}
+            aria-invalid={errors.username ? 'true' : 'false'}
+            aria-describedby={errors.username ? 'username-error' : undefined}
+          />
+          {errors.username && (
+            <p id="username-error" className="mt-1 text-sm text-red-600">
+              {errors.username.message}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-gray-500">
+            3-30 characters. Letters, numbers, underscores, and hyphens only.
+          </p>
+        </div>
+        
         {/* Password Field */}
         <div>
           <label

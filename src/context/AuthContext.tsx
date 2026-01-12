@@ -128,22 +128,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * For this tutorial, we'll implement a simple check.
    */
   const checkAuth = async () => {
-    try {
-      // Option 1: Call a /api/auth/me endpoint you create
-      // const response = await axios.get('/api/auth/me')
-      // setUser(response.data.user)
-      
-      // Option 2: Just check if cookie exists (via middleware redirect)
-      // If we reached here and middleware didn't redirect, we might be auth'd
-      
-      // For now, we'll just check cookie existence client-side
-      // In production, always verify with backend
-      const hasAuth = document.cookie.includes('accessToken')
-      if (hasAuth) {
-        // In real app, fetch user data from backend
-        // For now, we'll just set a placeholder
-        setUser({ email: 'user@example.com' })
+  try {
+    // Check if cookie exists
+    const hasAuth = document.cookie.includes('accessToken')
+    if (hasAuth) {
+      // In production, you'd fetch user data from /api/auth/me
+      // For now, get from localStorage or set placeholder
+      const storedUser = localStorage.getItem('user')
+      if (storedUser) {
+        setUser(JSON.parse(storedUser))
+      } else {
+        setUser({ 
+          email: 'user@example.com',
+          username: 'User' 
+        })
       }
+    }
     } catch (error) {
       console.error('Auth check failed:', error)
       setUser(null)
@@ -175,94 +175,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * ❌ Functions not used as dependencies
    */
   const signUp = useCallback(async (data: SignUpData) => {
-    try {
-      setIsLoading(true)
-      
-      /**
-       * Call our Next.js API route (not backend directly)
-       * 
-       * Why proxy through our API route?
-       * 1. Can set httpOnly cookies (client JS can't)
-       * 2. Hides backend URL from client
-       * 3. Can add rate limiting, logging, etc.
-       * 4. Consistent error handling
-       */
-      const response = await axios.post('/api/auth/signup', data, {
-        withCredentials: true, // Include cookies in request
-      })
+  try {
+    setIsLoading(true)
+    
+    const response = await axios.post('/api/auth/signup', data, {
+      withCredentials: true,
+    })
 
-      // Extract user data from response
-      // Note: Our API route sets cookies, we don't need to handle tokens here
-      const userEmail = data.email
-      setUser({ email: userEmail })
-      
-      // Redirect to dashboard after successful signup
-      router.push('/dashboard')
-    } catch (error) {
-      console.error('Signup failed:', error)
-      throw error // Re-throw so form can handle it
-    } finally {
-      setIsLoading(false)
+    const user = { 
+      email: data.email,
+      username: data.username 
     }
-  }, [router])
+    setUser(user)
+    localStorage.setItem('user', JSON.stringify(user)) // ✅ Store user
+    
+    router.push('/dashboard')
+  } catch (error) {
+    console.error('Signup failed:', error)
+    throw error
+  } finally {
+    setIsLoading(false)
+  }
+}, [router])
 
   /**
    * Sign in function
    * Similar to signUp but for existing users
    */
   const signIn = useCallback(async (data: SignInData) => {
-    try {
-      setIsLoading(true)
-      
-      const response = await axios.post('/api/auth/signin', data, {
-        withCredentials: true,
-      })
+  try {
+    setIsLoading(true)
+    
+    const response = await axios.post('/api/auth/signin', data, {
+      withCredentials: true,
+    })
 
-      const userEmail = data.email
-      setUser({ email: userEmail })
-      
-      router.push('/dashboard')
-    } catch (error) {
-      console.error('Signin failed:', error)
-      throw error
-    } finally {
-      setIsLoading(false)
+    // In production, backend would return username
+    const user = { 
+      email: data.email,
+      username: data.email.split('@')[0] // Extract from email as fallback
     }
-  }, [router])
+    setUser(user)
+    localStorage.setItem('user', JSON.stringify(user)) // ✅ Store user
+    
+    router.push('/dashboard')
+  } catch (error) {
+    console.error('Signin failed:', error)
+    throw error
+  } finally {
+    setIsLoading(false)
+  }
+}, [router])
 
-  /**
-   * Logout function
-   * 
-   * Steps:
-   * 1. Call backend logout endpoint (invalidates refresh token)
-   * 2. Clear cookies via API route
-   * 3. Clear local state
-   * 4. Redirect to signin
-   */
-  const logout = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      
-      // Call logout API route
-      // This will call backend /auth/logout AND clear cookies
-      await axios.post('/api/auth/logout', {}, {
-        withCredentials: true,
-      })
-      
-      // Clear local state
-      setUser(null)
-      
-      // Redirect to signin
-      router.push('/signin')
-    } catch (error) {
-      console.error('Logout failed:', error)
-      // Even if logout fails, clear local state
-      setUser(null)
-      router.push('/signin')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [router])
+const logout = useCallback(async () => {
+  try {
+    setIsLoading(true)
+    
+    await axios.post('/api/auth/logout', {}, {
+      withCredentials: true,
+    })
+    
+    setUser(null)
+    localStorage.removeItem('user') // ✅ Clear stored user
+    
+    router.push('/signin')
+  } catch (error) {
+    console.error('Logout failed:', error)
+    setUser(null)
+    localStorage.removeItem('user')
+    router.push('/signin')
+  } finally {
+    setIsLoading(false)
+  }
+}, [router])
 
   /**
    * Manually refresh authentication

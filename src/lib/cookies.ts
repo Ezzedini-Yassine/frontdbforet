@@ -87,6 +87,9 @@ export const COOKIE_NAMES = {
  * Example usage:
  * setCookie('accessToken', 'eyJhbGc...', { maxAge: 900 }) // 15 min
  */
+/**
+ * Set a cookie with secure defaults
+ */
 export async function setCookie(
   name: string,
   value: string,
@@ -99,6 +102,14 @@ export async function setCookie(
     ...options,
   }
 
+  // ✅ IMPORTANT: Ensure value is a string and not empty
+  if (!value || typeof value !== 'string') {
+    console.error(`❌ Attempted to set cookie "${name}" with invalid value:`, value)
+    return
+  }
+
+  console.log(`✅ Setting cookie "${name}" with value length: ${value.length}`)
+  
   cookieStore.set(name, value, cookieOptions)
 }
 
@@ -158,10 +169,26 @@ export async function deleteCookie(name: string) {
  *   → User stays logged in without re-entering password
  *   → Can be invalidated server-side if needed
  */
+/**
+ * Set authentication cookies (access + refresh tokens)
+ */
 export async function setAuthCookies(
   accessToken: string,
   refreshToken: string
 ) {
+  console.log('🔐 Setting auth cookies:', {
+    hasAccessToken: !!accessToken,
+    hasRefreshToken: !!refreshToken,
+    accessTokenLength: accessToken?.length || 0,
+    refreshTokenLength: refreshToken?.length || 0
+  })
+
+  // ✅ Validate tokens before setting
+  if (!accessToken || !refreshToken) {
+    console.error('❌ Cannot set auth cookies - tokens are missing!')
+    throw new Error('Invalid tokens provided')
+  }
+
   // Access token: 15 minutes (900 seconds)
   await setCookie(COOKIE_NAMES.ACCESS_TOKEN, accessToken, {
     maxAge: 15 * 60, // 15 minutes
@@ -171,6 +198,8 @@ export async function setAuthCookies(
   await setCookie(COOKIE_NAMES.REFRESH_TOKEN, refreshToken, {
     maxAge: 7 * 24 * 60 * 60, // 7 days
   })
+  
+  console.log('✅ Auth cookies set successfully')
 }
 
 /**
