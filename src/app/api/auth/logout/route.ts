@@ -14,11 +14,18 @@ import { clearAuthCookies, getCookie } from '@/lib/cookies'
 /**
  * POST /api/auth/logout
  * 
- * Note: This endpoint should be called even if the user is not authenticated
- * to ensure cookies are cleared. However, calling backend logout requires auth.
+ * Handles user logout by:
+ * 1. Calling backend logout (invalidates refresh token server-side)
+ * 2. Clearing auth cookies
+ * 3. Returning success response
+ * 
+ * Note: If access token is expired, we still clear cookies locally
+ * and consider logout successful from frontend perspective
  */
 export async function POST(request: NextRequest) {
   try {
+    console.log('🚪 Logout requested')
+
     /**
      * Get access token from cookies to send to backend
      * Backend's /auth/logout endpoint requires valid access token (AtGuard)
@@ -30,6 +37,10 @@ export async function POST(request: NextRequest) {
      * 
      * This invalidates the refresh token in the backend database.
      * Even if this fails, we still want to clear cookies locally.
+     * 
+     * Important: If access token is expired (30 seconds in your case),
+     * backend will return 401. This is EXPECTED and OK.
+     * We still logout the user from frontend.
      */
     if (accessToken) {
       try {
@@ -44,21 +55,50 @@ export async function POST(request: NextRequest) {
             },
           }
         )
+        console.log('✅ Backend logout successful')
       } catch (backendError) {
         /**
-         * Backend logout failed (maybe token already expired)
-         * Log it but continue to clear local cookies anyway
-         * User should still be logged out from frontend perspective
+         * Backend logout failed (most common: token already expired)
+         * This is NOT a critical error - we still logout locally
+         * 
+         * Common reasons:
+         * - Access token expired (401)
+         * - User already logged out
+         * - Backend is down
+         * 
+         * In all cases, we proceed with local logout
          */
-        console.error('Backend logout failed:', backendError)
+        if (axios.isAxiosError(backendError)) {
+          const status = backendError.response?.status
+          
+          if (status === 401) {
+            // Token expired - this is expected and fine
+            console.log('ℹ️ Access token already expired, proceeding with local logout')
+          } else {
+            // Other backend error
+            console.warn('⚠️ Backend logout failed:', {
+              status,
+              message: backendError.response?.data?.message
+            })
+          }
+        } else {
+          console.error('⚠️ Unexpected logout error:', backendError)
+        }
+        // Continue to clear cookies anyway
       }
+    } else {
+      console.log('ℹ️ No access token found, clearing cookies only')
     }
 
     /**
      * Clear auth cookies regardless of backend response
      * This ensures user is logged out on frontend even if backend fails
+     * 
+     * This is the CRITICAL part - always clear cookies
      */
     await clearAuthCookies()
+    
+    console.log('✅ Logout successful, cookies cleared')
 
     return NextResponse.json(
       { message: 'Logout successful' },
@@ -72,14 +112,15 @@ export async function POST(request: NextRequest) {
      */
     try {
       await clearAuthCookies()
+      console.log('✅ Cookies cleared despite error')
     } catch (cookieError) {
-      console.error('Failed to clear cookies:', cookieError)
+      console.error('❌ Failed to clear cookies:', cookieError)
     }
 
-    console.error('Logout error:', error)
+    console.error('❌ Logout error:', error)
     return NextResponse.json(
-      { error: 'Logout failed, but local session cleared' },
-      { status: 500 }
+      { message: 'Logout completed locally' }, // Still success from user perspective
+      { status: 200 } // Return 200, not 500, because local logout succeeded
     )
   }
 }

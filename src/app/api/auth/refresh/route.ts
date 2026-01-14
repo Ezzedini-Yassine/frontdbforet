@@ -50,11 +50,11 @@ export async function POST(request: NextRequest) {
      */
     const refreshToken = await getCookie('refreshToken')
 
+    console.log('🔄 Token refresh requested')
+    console.log('🔍 Refresh token present:', !!refreshToken)
+
     if (!refreshToken) {
-      /**
-       * No refresh token found - user needs to login again
-       * Clear any remaining cookies to ensure clean state
-       */
+      console.error('❌ No refresh token found in cookies')
       await clearAuthCookies()
       return NextResponse.json(
         { error: 'No refresh token found. Please login again.' },
@@ -62,21 +62,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    /**
-     * Call backend refresh endpoint
-     * 
-     * Your NestJS backend expects refresh token in request
-     * Check your RtGuard implementation for exact format:
-     * - Header? Authorization: Bearer {refreshToken}
-     * - Body? { refreshToken: string }
-     * - Cookie? (if backend reads cookies)
-     * 
-     * Based on typical implementations, sending in Authorization header:
-     */
+    console.log('📤 Calling backend refresh endpoint')
+
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-    const response = await axios.post<AuthResponse>(
+    const response = await axios.post(
       `${backendUrl}/auth/refresh`,
-      {}, // Empty body if token is in header
+      {}, // Empty body - token is in Authorization header
       {
         headers: {
           'Authorization': `Bearer ${refreshToken}`,
@@ -85,46 +76,55 @@ export async function POST(request: NextRequest) {
       }
     )
 
-    /**
-     * Backend returned new tokens
-     * Extract and set them in cookies
-     */
-    const { accessToken, refreshToken: newRefreshToken } = response.data
+    console.log('📥 Backend refresh response status:', response.status)
+    
+    // ✅ LOG THE ENTIRE RESPONSE (same pattern as signin/signup)
+    console.log('📥 FULL Backend response.data:', JSON.stringify(response.data, null, 2))
+    console.log('📥 Type of response.data:', typeof response.data)
+    console.log('📥 Keys in response.data:', Object.keys(response.data || {}))
 
-    /**
-     * Update cookies with new tokens
-     * This replaces old tokens with fresh ones
-     */
+    // ✅ Try different possible property names (backend uses snake_case)
+    const data = response.data
+    const accessToken = data.access_token || data.accessToken || data.Access_token
+    const newRefreshToken = data.refresh_token || data.refreshToken || data.Refresh_token
+
+    console.log('📥 Extracted tokens:', {
+      accessToken: accessToken ? `${accessToken.substring(0, 20)}...` : 'MISSING',
+      newRefreshToken: newRefreshToken ? `${newRefreshToken.substring(0, 20)}...` : 'MISSING',
+      accessTokenLength: accessToken?.length || 0,
+      refreshTokenLength: newRefreshToken?.length || 0
+    })
+
+    // ✅ Validate tokens exist
+    if (!accessToken || !newRefreshToken) {
+      console.error('❌ Backend did not return new tokens!')
+      console.error('❌ Available properties:', Object.keys(data || {}))
+      await clearAuthCookies()
+      return NextResponse.json(
+        { error: 'Token refresh failed - no tokens received from backend' },
+        { status: 500 }
+      )
+    }
+
+    // Update cookies with new tokens
     await setAuthCookies(accessToken, newRefreshToken)
 
-    /**
-     * Return success
-     * Axios interceptor will retry original failed request
-     */
+    console.log('✅ Token refresh successful, new cookies set')
+
     return NextResponse.json(
       { message: 'Token refreshed successfully' },
       { status: 200 }
     )
 
   } catch (error) {
-    /**
-     * Refresh failed - could be:
-     * 1. Refresh token expired
-     * 2. Refresh token invalid (tampered, revoked)
-     * 3. Network error
-     * 4. Backend error
-     * 
-     * In all cases, clear cookies and force re-login
-     */
-    
-    // Clear cookies to ensure clean state
+    // Clear cookies on any error
     await clearAuthCookies()
 
     if (axios.isAxiosError(error)) {
       const status = error.response?.status || 500
       const message = error.response?.data?.message || 'Token refresh failed'
       
-      console.error('Backend refresh error:', {
+      console.error('❌ Backend refresh error:', {
         status,
         message,
         data: error.response?.data
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.error('Token refresh error:', error)
+    console.error('❌ Token refresh error:', error)
     return NextResponse.json(
       { error: 'An unexpected error occurred. Please login again.' },
       { status: 500 }

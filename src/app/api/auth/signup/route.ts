@@ -43,7 +43,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
 import { setAuthCookies } from '@/lib/cookies'
-import type { SignUpData, AuthResponse } from '@/types/auth'
+import type { SignUpData } from '@/types/auth'
 
 /**
  * POST /api/auth/signup
@@ -67,13 +67,10 @@ export async function POST(request: NextRequest) {
      */
     const body: SignUpData = await request.json()
     
-    /**
-     * Validate request body
-     * In production, use a validation library like Zod here
-     */
-    if (!body.email || !body.password) {
+    // Validate request body
+    if (!body.email || !body.password || !body.username) {
       return NextResponse.json(
-        { error: 'Email and password are required' },
+        { error: 'Email, username, and password are required' },
         { status: 400 }
       )
     }
@@ -90,7 +87,7 @@ export async function POST(request: NextRequest) {
     console.log('📤 Calling backend signup:', body.email)
 
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-    const response = await axios.post<AuthResponse>(
+    const response = await axios.post(
       `${backendUrl}/auth/signup`,
       body,
       {
@@ -101,33 +98,35 @@ export async function POST(request: NextRequest) {
     )
 
     console.log('📥 Backend response status:', response.status)
-    console.log('📥 Backend response data:', {
-      hasAccessToken: !!response.data?.accessToken,
-      hasRefreshToken: !!response.data?.refreshToken,
-      accessTokenLength: response.data?.accessToken?.length || 0,
-      refreshTokenLength: response.data?.refreshToken?.length || 0
+    
+    // ✅ LOG THE ENTIRE RESPONSE (same as signin)
+    console.log('📥 FULL Backend response.data:', JSON.stringify(response.data, null, 2))
+    console.log('📥 Type of response.data:', typeof response.data)
+    console.log('📥 Keys in response.data:', Object.keys(response.data || {}))
+
+    // ✅ Try different possible property names (backend uses snake_case)
+    const data = response.data
+    const accessToken = data.access_token || data.accessToken || data.Access_token
+    const refreshToken = data.refresh_token || data.refreshToken || data.Refresh_token
+
+    console.log('📥 Extracted tokens:', {
+      accessToken: accessToken ? `${accessToken.substring(0, 20)}...` : 'MISSING',
+      refreshToken: refreshToken ? `${refreshToken.substring(0, 20)}...` : 'MISSING',
+      accessTokenLength: accessToken?.length || 0,
+      refreshTokenLength: refreshToken?.length || 0
     })
-    /**
-     * Extract tokens from backend response
-     * Your NestJS backend returns: { accessToken: string, refreshToken: string }
-     */
-    const { accessToken, refreshToken } = response.data
 
     // ✅ Validate tokens exist
     if (!accessToken || !refreshToken) {
       console.error('❌ Backend did not return tokens!')
+      console.error('❌ Available properties:', Object.keys(data || {}))
       return NextResponse.json(
-        { error: 'Authentication failed - no tokens received' },
+        { error: 'Signup failed - no tokens received from backend' },
         { status: 500 }
       )
     }
 
-    /**
-     * Set httpOnly cookies with the tokens
-     * This is the KEY security step that can't be done client-side
-     * 
-     * Cookies will be automatically included in subsequent requests
-     */
+    // Set httpOnly cookies with the tokens
     await setAuthCookies(accessToken, refreshToken)
 
     console.log('✅ Signup successful, cookies set')
@@ -144,7 +143,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         message: 'Signup successful',
-        user: { email: body.email }
+        user: { 
+          email: body.email,
+          username: body.username 
+        }
       },
       { status: 201 }
     )
@@ -165,7 +167,7 @@ export async function POST(request: NextRequest) {
       const status = error.response?.status || 500
       const message = error.response?.data?.message || 'Signup failed'
       
-      console.error('Backend signup error:', {
+      console.error('❌ Backend signup error:', {
         status,
         message,
         data: error.response?.data
@@ -177,8 +179,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Unexpected error
-    console.error('Signup error:', error)
+    console.error('❌ Signup error:', error)
     return NextResponse.json(
       { error: 'An unexpected error occurred' },
       { status: 500 }
