@@ -1,12 +1,3 @@
-/**
- * Logout API Route Handler
- * 
- * Handles user logout by:
- * 1. Calling backend logout (invalidates refresh token server-side)
- * 2. Clearing auth cookies
- * 3. Returning success response
- */
-
 import { NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
 import { clearAuthCookies, getCookie } from '@/lib/cookies'
@@ -14,37 +5,31 @@ import { clearAuthCookies, getCookie } from '@/lib/cookies'
 /**
  * POST /api/auth/logout
  * 
- * Handles user logout by:
- * 1. Calling backend logout (invalidates refresh token server-side)
- * 2. Clearing auth cookies
- * 3. Returning success response
- * 
- * Note: If access token is expired, we still clear cookies locally
- * and consider logout successful from frontend perspective
+ * Server-side logout handler
+ * This runs on the Next.js server, NOT in the browser
  */
 export async function POST(request: NextRequest) {
   try {
     console.log('🚪 Logout requested')
 
     /**
-     * Get access token from cookies to send to backend
-     * Backend's /auth/logout endpoint requires valid access token (AtGuard)
+     * Get access token from cookies
+     * We need to send this to backend for logout
      */
     const accessToken = await getCookie('accessToken')
+    const refreshToken = await getCookie('refreshToken')
 
     /**
-     * Call backend logout endpoint if we have a token
+     * Call backend logout if we have an access token
      * 
-     * This invalidates the refresh token in the backend database.
-     * Even if this fails, we still want to clear cookies locally.
-     * 
-     * Important: If access token is expired (30 seconds in your case),
-     * backend will return 401. This is EXPECTED and OK.
-     * We still logout the user from frontend.
+     * Strategy: Try with current token first
+     * If it fails with 401 (expired), try refreshing then logout again
      */
-    if (accessToken) {
+    if (accessToken || refreshToken) {
       try {
         const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+        
+        // Try logout with current access token
         await axios.post(
           `${backendUrl}/auth/logout`,
           {},
@@ -55,50 +40,78 @@ export async function POST(request: NextRequest) {
             },
           }
         )
+        
         console.log('✅ Backend logout successful')
-      } catch (backendError) {
+        
+      } catch (backendError: any) {
         /**
-         * Backend logout failed (most common: token already expired)
-         * This is NOT a critical error - we still logout locally
-         * 
-         * Common reasons:
-         * - Access token expired (401)
-         * - User already logged out
-         * - Backend is down
-         * 
-         * In all cases, we proceed with local logout
+         * Backend logout failed
+         * Most common reason: Access token expired (401)
          */
-        if (axios.isAxiosError(backendError)) {
-          const status = backendError.response?.status
+        if (axios.isAxiosError(backendError) && backendError.response?.status === 401) {
+          console.log('⚠️ Access token expired, attempting refresh then logout')
           
-          if (status === 401) {
-            // Token expired - this is expected and fine
-            console.log('ℹ️ Access token already expired, proceeding with local logout')
-          } else {
-            // Other backend error
-            console.warn('⚠️ Backend logout failed:', {
-              status,
-              message: backendError.response?.data?.message
-            })
+          try {
+            const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+            // Try to refresh token
+            const refreshResponse = await axios.post(
+              `${backendUrl}/auth/refresh`,
+              {},
+              {
+                headers: {
+                  'Authorization': `Bearer ${refreshToken}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            )
+            
+            console.log('✅ Token refreshed, retrying logout')
+            
+            // Extract new access token
+            const newAccessToken = refreshResponse.data.access_token || refreshResponse.data.accessToken
+            
+            // Update cookies with new tokens
+            const newRefreshToken = refreshResponse.data.refresh_token || refreshResponse.data.refreshToken
+            if (newAccessToken && newRefreshToken) {
+              // We'll clear these anyway, but update them for the retry
+              await setCookie('accessToken', newAccessToken, { maxAge: 15 * 60 })
+              await setCookie('refreshToken', newRefreshToken, { maxAge: 7 * 24 * 60 * 60 })
+            }
+            
+            // Retry logout with fresh token
+            await axios.post(
+              `${backendUrl}/auth/logout`,
+              {},
+              {
+                headers: {
+                  'Authorization': `Bearer ${newAccessToken}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            )
+            
+            console.log('✅ Backend logout successful after refresh')
+            
+          } catch (refreshError) {
+            // Refresh or retry failed - just proceed with local logout
+            console.warn('⚠️ Could not refresh and logout, proceeding with local logout only')
           }
         } else {
-          console.error('⚠️ Unexpected logout error:', backendError)
+          // Other backend error (not 401)
+          console.warn('⚠️ Backend logout failed:', backendError.message)
         }
-        // Continue to clear cookies anyway
       }
     } else {
-      console.log('ℹ️ No access token found, clearing cookies only')
+      console.log('ℹ️ No tokens found, clearing cookies only')
     }
 
     /**
-     * Clear auth cookies regardless of backend response
-     * This ensures user is logged out on frontend even if backend fails
-     * 
-     * This is the CRITICAL part - always clear cookies
+     * Always clear auth cookies at the end
+     * This ensures user is logged out locally
      */
     await clearAuthCookies()
     
-    console.log('✅ Logout successful, cookies cleared')
+    console.log('✅ Logout complete, cookies cleared')
 
     return NextResponse.json(
       { message: 'Logout successful' },
@@ -106,10 +119,9 @@ export async function POST(request: NextRequest) {
     )
 
   } catch (error) {
-    /**
-     * Even on error, try to clear cookies
-     * Better to err on the side of logging user out
-     */
+    console.error('❌ Logout error:', error)
+    
+    // Still try to clear cookies
     try {
       await clearAuthCookies()
       console.log('✅ Cookies cleared despite error')
@@ -117,29 +129,22 @@ export async function POST(request: NextRequest) {
       console.error('❌ Failed to clear cookies:', cookieError)
     }
 
-    console.error('❌ Logout error:', error)
     return NextResponse.json(
-      { message: 'Logout completed locally' }, // Still success from user perspective
-      { status: 200 } // Return 200, not 500, because local logout succeeded
+      { message: 'Logout completed locally' },
+      { status: 200 }
     )
   }
 }
 
-/**
- * 🎓 KEY LEARNING: Graceful Logout Handling
- * =========================================
- * 
- * Logout should ALWAYS succeed from user perspective.
- * Even if backend is down, clear cookies and let user "logout" locally.
- * 
- * Why?
- * - User expects logout button to work
- * - Even partial logout is better than being stuck
- * - Backend can clean up stale tokens later
- * 
- * Security consideration:
- * - If backend logout fails, refresh token may still be valid
- * - Implement token expiration on backend
- * - Consider refresh token rotation (new token on each use)
- * - Monitor for suspicious activity
- */
+// Helper function (add this at the top with other imports)
+async function setCookie(name: string, value: string, options: any) {
+  const { cookies } = await import('next/headers')
+  const cookieStore = await cookies()
+  cookieStore.set(name, value, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    ...options
+  })
+}
